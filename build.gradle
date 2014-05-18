@@ -37,4 +37,11 @@ dependencies {
 
     compile 'org.slf4j:slf4j-api:1.7.+'
     compile 'org.osmdroid:osmdroid-android:4.+'
+    // The production code uses the GSON API at compile time
+    compile 'com.google.code.gson:gson:2.2.4'
+    //compile 'org.mapsforge:mapsforge:0.4.3'
+    //compile 'org.mapsforge:mapsforge-core:0.4.3'
+    //compile 'org.mapsforge:mapsforge-map:0.4.3'
+    //compile 'org.mapsforge:mapsforge-map-android:0.4.3'
+    compile fileTree(dir: 'libs', include: '*.jar')
 }

@@ -4,6 +4,8 @@ import org.osmdroid.bonuspack.utils.BonusPackHelper;
 import org.osmdroid.views.MapView;
 import android.content.Context;
 import android.graphics.drawable.Drawable;
+import android.text.Html;
+import android.text.Spanned;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
@@ -14,6 +16,7 @@ import android.widget.TextView;
  * Default implementation of InfoWindow for a Marker. 
  * It handles a text and a description. 
  * It also handles optionally a sub-description and an image. 
+ * Description and sub-description interpret HTML tags (in the limits of the Html.fromHtml(String) API). 
  * Clicking on the bubble will close it. 
  * 
  * @author M.Kergall
@@ -25,6 +28,8 @@ public class MarkerInfoWindow extends InfoWindow {
 			mSubDescriptionId=BonusPackHelper.UNDEFINED_RES_ID, 
 			mImageId=BonusPackHelper.UNDEFINED_RES_ID; //resource ids
 
+	protected Marker mMarkerRef; //reference to the Marker on which it is opened. Null if none. 
+	
 	private static void setResIds(Context context){
 		String packageName = context.getPackageName(); //get application package name
 		mTitleId = context.getResources().getIdentifier("id/bubble_title", null, packageName);
@@ -54,22 +59,23 @@ public class MarkerInfoWindow extends InfoWindow {
 	}
 	
 	@Override public void onOpen(Object item) {
-		Marker marker = (Marker)item;
-		String title = marker.getTitle();
+		mMarkerRef = (Marker)item;
+		String title = mMarkerRef.getTitle();
 		if (title == null)
 			title = "";
 		((TextView)mView.findViewById(mTitleId /*R.id.title*/)).setText(title);
 		
-		String snippet = marker.getSnippet();
+		String snippet = mMarkerRef.getSnippet();
 		if (snippet == null)
 			snippet = "";
-		((TextView)mView.findViewById(mDescriptionId /*R.id.description*/)).setText(snippet);
+		Spanned snippetHtml = Html.fromHtml(snippet);
+		((TextView)mView.findViewById(mDescriptionId /*R.id.description*/)).setText(snippetHtml);
 		
 		//handle sub-description, hidding or showing the text view:
 		TextView subDescText = (TextView)mView.findViewById(mSubDescriptionId);
-		String subDesc = marker.getSubDescription();
+		String subDesc = mMarkerRef.getSubDescription();
 		if (subDesc != null && !("".equals(subDesc))){
-			subDescText.setText(subDesc);
+			subDescText.setText(Html.fromHtml(subDesc));
 			subDescText.setVisibility(View.VISIBLE);
 		} else {
 			subDescText.setVisibility(View.GONE);
@@ -77,7 +83,7 @@ public class MarkerInfoWindow extends InfoWindow {
 
 		//handle image
 		ImageView imageView = (ImageView)mView.findViewById(mImageId /*R.id.image*/);
-		Drawable image = marker.getImage();
+		Drawable image = mMarkerRef.getImage();
 		if (image != null){
 			imageView.setImageDrawable(image); //or setBackgroundDrawable(image)?
 			imageView.setVisibility(View.VISIBLE);
@@ -86,7 +92,8 @@ public class MarkerInfoWindow extends InfoWindow {
 	}
 
 	@Override public void onClose() {
-		//by default, do nothing
+		mMarkerRef = null;
+		//by default, do nothing else
 	}
 	
 }

@@ -16,14 +16,19 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import javax.xml.parsers.SAXParser;
 import javax.xml.parsers.SAXParserFactory;
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.osmdroid.bonuspack.utils.BonusPackHelper;
 import org.osmdroid.bonuspack.utils.HttpConnection;
 import org.osmdroid.util.GeoPoint;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
+import com.google.gson.stream.JsonWriter;
 import android.os.Environment;
 import android.os.Parcel;
 import android.os.Parcelable;
@@ -234,14 +239,15 @@ public class KmlDocument implements Parcelable {
 		HttpConnection connection = new HttpConnection();
 		connection.doGet(url);
 		InputStream stream = connection.getStream();
+		boolean ok;
 		if (stream == null){
-			mKmlRoot = null;
+			ok = false;
 		} else {
-			parseStream(stream, url, null);
+			ok = parseKMLStream(stream, url, null);
 		}
 		connection.close();
 		//Log.d(BonusPackHelper.LOG_TAG, "KmlProvider.parseUrl - end");
-		return (mKmlRoot != null);
+		return ok;
 	}
 
 	/**
@@ -271,16 +277,17 @@ public class KmlDocument implements Parcelable {
 	public boolean parseKMLFile(File file){
 		Log.d(BonusPackHelper.LOG_TAG, "KmlProvider.parseKMLFile:"+file.getAbsolutePath());
 		InputStream stream = null;
+		boolean ok;
 		try {
 			stream = new BufferedInputStream(new FileInputStream(file));
-			parseStream(stream, file.getAbsolutePath(), null);
+			ok = parseKMLStream(stream, file.getAbsolutePath(), null);
 			stream.close();
 		} catch (Exception e){
 			e.printStackTrace();
-			mKmlRoot = null;
+			ok = false;
 		}
 		//Log.d(BonusPackHelper.LOG_TAG, "KmlProvider.parseFile - end");
-		return (mKmlRoot != null);
+		return ok;
 	}
 	
 	/** 
@@ -307,7 +314,7 @@ public class KmlDocument implements Parcelable {
 				InputStream stream = kmzFile.getInputStream(rootEntry);
 				String fullFilePath = file.getAbsolutePath();
 				Log.d(BonusPackHelper.LOG_TAG, "KML root:"+rootFileName);
-				result = parseStream(stream, fullFilePath, kmzFile);
+				result = parseKMLStream(stream, fullFilePath, kmzFile);
 			} else {
 				Log.d(BonusPackHelper.LOG_TAG, "No .kml entry found.");
 				result = false;
@@ -328,17 +335,19 @@ public class KmlDocument implements Parcelable {
 	 * @param kmzContainer KMZ file containing this KML file - or null if not applicable. 
 	 * @return true if OK, false if any error. 
 	 */
-	public boolean parseStream(InputStream stream, String fullFilePath, ZipFile kmzContainer){
+	public boolean parseKMLStream(InputStream stream, String fullFilePath, ZipFile kmzContainer){
 		KmlSaxHandler handler = new KmlSaxHandler(fullFilePath, kmzContainer);
+		boolean ok;
 		try {
 			SAXParser parser = SAXParserFactory.newInstance().newSAXParser();
 			parser.parse(stream, handler);
 			mKmlRoot = handler.mKmlRoot;
+			ok = true;
 		} catch (Exception e) {
 			e.printStackTrace();
-			mKmlRoot = null;
+			ok = false;
 		}
-		return (mKmlRoot != null);
+		return ok;
 	}
 	
 	// KmlSaxHandler -------------
@@ -375,23 +384,24 @@ public class KmlDocument implements Parcelable {
 		
 		protected void loadNetworkLink(String href, ZipFile kmzContainer){
 			KmlDocument subDocument = new KmlDocument();
+			boolean ok;
 			if (href.startsWith("http://") || href.startsWith("https://") )
-				subDocument.parseUrl(href);
+				ok = subDocument.parseUrl(href);
 			else if (kmzContainer == null){
 				File file = new File(mFullPath);
 				File subFile = new File(file.getParent()+'/'+href);
-				subDocument.parseKMLFile(subFile);
+				ok = subDocument.parseKMLFile(subFile);
 			} else {
 				try {
 					final ZipEntry fileEntry = kmzContainer.getEntry(href);
 					InputStream stream = kmzContainer.getInputStream(fileEntry);
 					Log.d(BonusPackHelper.LOG_TAG, "Load NetworkLink:"+href);
-					subDocument.parseStream(stream, mFullPath, kmzContainer);
+					ok = subDocument.parseKMLStream(stream, mFullPath, kmzContainer);
 				} catch (Exception e) {
-					subDocument.mKmlRoot = null;
+					ok = false;
 				}
 			}
-			if (subDocument.mKmlRoot != null){
+			if (ok){
 				//add subDoc root to the current feature, which is -normally- the NetworkLink:
 				((KmlFolder)mKmlCurrentFeature).add(subDocument.mKmlRoot);
 				//add all subDocument styles to mStyles:
@@ -489,7 +499,6 @@ public class KmlDocument implements Parcelable {
 				if (mKmlGeometryStack.size() == 1){
 					//no MultiGeometry parent: add this Geometry in the current Feature:
 					((KmlPlacemark)mKmlCurrentFeature).mGeometry = mKmlCurrentGeometry;
-					mKmlCurrentFeature.mBB = mKmlCurrentGeometry.getBoundingBox();
 					mKmlGeometryStack.remove(mKmlGeometryStack.size()-1); //pop current from stack
 					mKmlCurrentGeometry = null;
 				} else {
@@ -526,12 +535,13 @@ public class KmlDocument implements Parcelable {
 					mKmlCurrentFeature.mStyle = mStringBuilder.toString();
 			} else if (localName.equals("color")){
 				if (mCurrentStyle != null) {
-					mColorStyle.mColor = ColorStyle.parseKMLColor(mStringBuilder.toString());
+					if (mColorStyle != null)
+						mColorStyle.mColor = ColorStyle.parseKMLColor(mStringBuilder.toString());
 				} else if (mKmlCurrentGroundOverlay != null){
 					mKmlCurrentGroundOverlay.mColor = ColorStyle.parseKMLColor(mStringBuilder.toString());
 				}
 			} else if (localName.equals("colorMode")){
-				if (mCurrentStyle != null)
+				if (mCurrentStyle != null && mColorStyle != null)
 					mColorStyle.mColorMode = (mStringBuilder.toString().equals("random")?ColorStyle.MODE_RANDOM:ColorStyle.MODE_NORMAL);
 			} else if (localName.equals("width")){
 				if (mCurrentStyle != null && mCurrentStyle.mLineStyle != null)
@@ -642,14 +652,14 @@ public class KmlDocument implements Parcelable {
 		}
 	}
 
-	public int mGeoJSONIdentFactor = 0;
-	
 	public boolean saveAsGeoJSON(Writer writer){
-		JSONObject json = mKmlRoot.asGeoJSON(true);
+		JsonObject json = mKmlRoot.asGeoJSON(true);
 		if (json == null)
 			return false;
 		try {
-			writer.write(json.toString(mGeoJSONIdentFactor));
+			Gson gson = new GsonBuilder().create();
+			JsonWriter jsonWriter = new JsonWriter(writer);
+			gson.toJson(json, jsonWriter);
 			return true;
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -677,7 +687,7 @@ public class KmlDocument implements Parcelable {
 	}
 	
 	/** Parse a GeoJSON object. */
-	public boolean parseGeoJSON(JSONObject json){
+	public boolean parseGeoJSON(JsonObject json){
 		KmlFeature feature = KmlFeature.parseGeoJSON(json);
 		if (feature instanceof KmlFolder)
 			mKmlRoot = (KmlFolder)feature;
@@ -691,9 +701,10 @@ public class KmlDocument implements Parcelable {
 	/** Parse a GeoJSON String */
 	public boolean parseGeoJSON(String jsonString){
 		try {
-			JSONObject json = new JSONObject(jsonString);
-			return parseGeoJSON(json);
-		} catch (JSONException e) {
+			JsonParser parser = new JsonParser();
+			JsonElement json = parser.parse(jsonString);
+			return parseGeoJSON(json.getAsJsonObject());
+		} catch (JsonSyntaxException e) {
 			e.printStackTrace();
 			return false;
 		}
@@ -701,9 +712,8 @@ public class KmlDocument implements Parcelable {
 	
 	/** Parse a GeoJSON File */
 	public boolean parseGeoJSON(File file){
-		FileInputStream input;
 		try {
-			input = new FileInputStream(file);
+			FileInputStream input = new FileInputStream(file);
 			String s = BonusPackHelper.convertStreamToString(input);
 			input.close();
 			return parseGeoJSON(s);
