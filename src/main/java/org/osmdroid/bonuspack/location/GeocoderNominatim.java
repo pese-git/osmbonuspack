@@ -152,6 +152,10 @@ public class GeocoderNominatim {
 			String osm_type = jResult.get("osm_type").getAsString();
 			extras.putString("osm_type", osm_type);
 		}
+        if (jResult.has("display_name")){
+            String display_name = jResult.get("display_name").getAsString();
+            extras.putString("display_name", display_name);
+        }
 		gAddress.setExtras(extras);
 		
 		return gAddress;
